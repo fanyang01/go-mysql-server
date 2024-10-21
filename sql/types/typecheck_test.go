@@ -18,6 +18,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/dolthub/go-mysql-server/sql"
 )
 
 func TestIsGeometry(t *testing.T) {
@@ -93,6 +95,6 @@ func TestSystemTypesIsSet(t *testing.T) {
 	assert.False(t, IsSet(systemUintType{}))
 	assert.False(t, IsSet(systemDoubleType{}))
 	assert.False(t, IsSet(systemEnumType{}))
-	assert.True(t, IsSet(NewSystemSetType("", "")))
+	assert.True(t, IsSet(NewSystemSetType("", sql.Collation_Default, "")))
 	assert.False(t, IsSet(systemStringType{}))
 }
