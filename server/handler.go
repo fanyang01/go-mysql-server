@@ -372,15 +372,15 @@ func (h *Handler) doQuery(
 	bindings map[string]*querypb.BindVariable,
 	callback func(*sqltypes.Result, bool) error,
 	qFlags *sql.QueryFlags,
-) (string, error) {
-	sqlCtx, err := h.sm.NewContext(ctx, c, query)
+) (remainder string, err error) {
+	var sqlCtx *sql.Context
+	sqlCtx, err = h.sm.NewContext(ctx, c, query)
 	if err != nil {
 		return "", err
 	}
 
 	start := time.Now()
 
-	var remainder string
 	var prequery string
 	if parsed == nil {
 		_, inPreparedCache := h.e.PreparedDataCache.GetCachedStmt(sqlCtx.Session.ID(), query)
@@ -411,23 +411,24 @@ func (h *Handler) doQuery(
 	sqlCtx.GetLogger().Debugf("Starting query")
 
 	finish := observeQuery(sqlCtx, query)
-	defer finish(err)
+	defer func() {
+		finish(err)
+	}()
 
 	sqlCtx.GetLogger().Tracef("beginning execution")
 
-	oCtx := ctx
-
 	// TODO: it would be nice to put this logic in the engine, not the handler, but we don't want the process to be
 	//  marked done until we're done spooling rows over the wire
-	ctx, err = sqlCtx.ProcessList.BeginQuery(sqlCtx, query)
-	defer func() {
-		if err != nil && ctx != nil {
-			sqlCtx.ProcessList.EndQuery(sqlCtx)
-		}
-	}()
+	sqlCtx, err = sqlCtx.ProcessList.BeginQuery(sqlCtx, query)
+	if err != nil {
+		return remainder, err
+	}
+	defer sqlCtx.ProcessList.EndQuery(sqlCtx)
 
+	var schema sql.Schema
+	var rowIter sql.RowIter
 	qFlags.Set(sql.QFlagDeferProjections)
-	schema, rowIter, qFlags, err := queryExec(sqlCtx, query, parsed, analyzedPlan, bindings, qFlags)
+	schema, rowIter, qFlags, err = queryExec(sqlCtx, query, parsed, analyzedPlan, bindings, qFlags)
 	if err != nil {
 		sqlCtx.GetLogger().WithError(err).Warn("error running query")
 		if verboseErrorLogging {
@@ -454,9 +455,6 @@ func (h *Handler) doQuery(
 	if err != nil {
 		return remainder, err
 	}
-
-	// errGroup context is now canceled
-	ctx = oCtx
 
 	if err = setConnStatusFlags(sqlCtx, c); err != nil {
 		return remainder, err
@@ -519,28 +517,26 @@ func resultForEmptyIter(ctx *sql.Context, iter sql.RowIter, resultFields []*quer
 func GetDeferredProjections(iter sql.RowIter) (sql.RowIter, []sql.Expression) {
 	switch i := iter.(type) {
 	case *rowexec.ExprCloserIter:
-		_, projs := GetDeferredProjections(i.GetIter())
-		return i, projs
+		if newChild, projs := GetDeferredProjections(i.GetIter()); projs != nil {
+			return i.WithChildIter(newChild), projs
+		}
 	case *plan.TrackedRowIter:
-		_, projs := GetDeferredProjections(i.GetIter())
-		return i, projs
+		if newChild, projs := GetDeferredProjections(i.GetIter()); projs != nil {
+			return i.WithChildIter(newChild), projs
+		}
 	case *rowexec.TransactionCommittingIter:
-		newChild, projs := GetDeferredProjections(i.GetIter())
-		if projs != nil {
-			i.WithChildIter(newChild)
+		if newChild, projs := GetDeferredProjections(i.GetIter()); projs != nil {
+			return i.WithChildIter(newChild), projs
 		}
-		return i, projs
 	case *iters.LimitIter:
-		newChild, projs := GetDeferredProjections(i.ChildIter)
-		if projs != nil {
+		if newChild, projs := GetDeferredProjections(i.ChildIter); projs != nil {
 			i.ChildIter = newChild
+			return i, projs
 		}
-		return i, projs
 	case *rowexec.ProjectIter:
 		if i.CanDefer() {
 			return i.GetChildIter(), i.GetProjections()
 		}
-		return i, nil
 	}
 	return iter, nil
 }
@@ -1086,9 +1082,9 @@ func (h *Handler) executeBoundPlan(
 	_ sqlparser.Statement,
 	plan sql.Node,
 	_ map[string]*querypb.BindVariable,
-	_ *sql.QueryFlags,
+	qFlags *sql.QueryFlags,
 ) (sql.Schema, sql.RowIter, *sql.QueryFlags, error) {
-	return h.e.PrepQueryPlanForExecution(ctx, query, plan)
+	return h.e.PrepQueryPlanForExecution(ctx, query, plan, qFlags)
 }
 
 func bindingsToExprs(bindings map[string]*querypb.BindVariable) (map[string]sqlparser.Expr, error) {

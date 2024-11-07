@@ -30,7 +30,6 @@ import (
 	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression"
-	"github.com/dolthub/go-mysql-server/sql/plan"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	_ "github.com/dolthub/go-mysql-server/sql/variables"
 )
@@ -194,13 +193,6 @@ func TestSingleQueryPrepared(t *testing.T) {
 	engine.EngineAnalyzer().Verbose = true
 
 	enginetest.TestScriptWithEnginePrepared(t, engine, harness, test)
-}
-
-func newUpdateResult(matched, updated int) types.OkResult {
-	return types.OkResult{
-		RowsAffected: uint64(updated),
-		Info:         plan.UpdateInfo{Matched: matched, Updated: updated},
-	}
 }
 
 // Convenience test for debugging a single query. Unskip and set to the desired query.
@@ -490,10 +482,6 @@ func TestIndexQueryPlans(t *testing.T) {
 			enginetest.TestIndexQueryPlans(t, harness)
 		})
 	}
-}
-
-func TestParallelismQueries(t *testing.T) {
-	enginetest.TestParallelismQueries(t, enginetest.NewMemoryHarness("default", 2, testNumPartitions, true, nil))
 }
 
 func TestQueryErrors(t *testing.T) {
@@ -1040,6 +1028,9 @@ func newMergableIndex(dbs []sql.Database, tableName string, exprs ...sql.Express
 	if db == nil {
 		return nil
 	}
+	if tableRevision, ok := table.(*memory.TableRevision); ok {
+		table = tableRevision.Table
+	}
 	return &memory.Index{
 		DB:         db.Name(),
 		DriverName: memory.IndexDriverId,
@@ -1063,14 +1054,6 @@ func findTable(dbs []sql.Database, tableName string) (sql.Database, sql.Table) {
 		}
 	}
 	return nil, nil
-}
-
-func mergeSetupScripts(scripts ...setup.SetupScript) []string {
-	var all []string
-	for _, s := range scripts {
-		all = append(all, s...)
-	}
-	return all
 }
 
 func TestSQLLogicTests(t *testing.T) {

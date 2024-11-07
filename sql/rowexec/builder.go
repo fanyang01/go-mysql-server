@@ -18,6 +18,7 @@ import (
 	"runtime/trace"
 
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/plan"
 )
 
 var DefaultBuilder = &BaseBuilder{}
@@ -31,8 +32,7 @@ type ExecBuilderFunc func(ctx *sql.Context, n sql.Node, r sql.Row) (sql.RowIter,
 // sql.ExecSourceRel are also built into the tree.
 type BaseBuilder struct {
 	// if override is provided, we try to build executor with this first
-	override                sql.NodeExecBuilder
-	triggerSavePointCounter int // tracks the number of save points that have been created by triggers
+	override sql.NodeExecBuilder
 }
 
 func (b *BaseBuilder) Build(ctx *sql.Context, n sql.Node, r sql.Row) (sql.RowIter, error) {
@@ -42,4 +42,15 @@ func (b *BaseBuilder) Build(ctx *sql.Context, n sql.Node, r sql.Row) (sql.RowIte
 
 func NewOverrideBuilder(override sql.NodeExecBuilder) sql.NodeExecBuilder {
 	return &BaseBuilder{override: override}
+}
+
+// FinalizeIters applies the final transformations on sql.RowIter before execution.
+func FinalizeIters(ctx *sql.Context, analyzed sql.Node, qFlags *sql.QueryFlags, iter sql.RowIter) (sql.RowIter, sql.Schema) {
+	var sch sql.Schema
+	iter, sch = AddAccumulatorIter(ctx, iter)
+	iter = AddTriggerRollbackIter(ctx, qFlags, iter)
+	iter = AddTransactionCommittingIter(qFlags, iter)
+	iter = plan.AddTrackedRowIter(ctx, analyzed, iter)
+	iter = AddExpressionCloser(analyzed, iter)
+	return iter, sch
 }

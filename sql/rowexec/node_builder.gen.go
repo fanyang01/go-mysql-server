@@ -54,8 +54,6 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildCreateRole(ctx, n, row)
 	case *plan.Loop:
 		return b.buildLoop(ctx, n, row)
-	case *plan.TransactionCommittingNode:
-		return b.buildTransactionCommittingNode(ctx, n, row)
 	case *plan.DropColumn:
 		return b.buildDropColumn(ctx, n, row)
 	case *plan.AnalyzeTable:
@@ -64,8 +62,6 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildUpdateHistogram(ctx, n, row)
 	case *plan.DropHistogram:
 		return b.buildDropHistogram(ctx, n, row)
-	case *plan.QueryProcess:
-		return b.buildQueryProcess(ctx, n, row)
 	case *plan.ShowBinlogs:
 		return b.buildShowBinlogs(ctx, n, row)
 	case *plan.ShowBinlogStatus:
@@ -154,8 +150,6 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildHaving(ctx, n, row)
 	case *plan.Signal:
 		return b.buildSignal(ctx, n, row)
-	case *plan.TriggerRollback:
-		return b.buildTriggerRollback(ctx, n, row)
 	case *plan.ExternalProcedure:
 		return b.buildExternalProcedure(ctx, n, row)
 	case *plan.Into:
@@ -216,8 +210,6 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildDropView(ctx, n, row)
 	case *plan.GroupBy:
 		return b.buildGroupBy(ctx, n, row)
-	case *plan.RowUpdateAccumulator:
-		return b.buildRowUpdateAccumulator(ctx, n, row)
 	case *plan.Block:
 		return b.buildBlock(ctx, n, row)
 	case *plan.InsertDestination:
@@ -250,8 +242,6 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildCreateIndex(ctx, n, row)
 	case *plan.Procedure:
 		return b.buildProcedure(ctx, n, row)
-	case *plan.NoopTriggerRollback:
-		return b.buildNoopTriggerRollback(ctx, n, row)
 	case *plan.With:
 		return b.buildWith(ctx, n, row)
 	case *plan.Project:
@@ -382,10 +372,6 @@ func (b *BaseBuilder) buildNodeExecNoAnalyze(ctx *sql.Context, n sql.Node, row s
 		return b.buildJSONTable(ctx, n, row)
 	case *plan.UnlockTables:
 		return b.buildUnlockTables(ctx, n, row)
-	case *plan.Exchange:
-		return b.buildExchange(ctx, n, row)
-	case *plan.ExchangePartition:
-		return b.buildExchangePartition(ctx, n, row)
 	case *plan.HashLookup:
 		return b.buildHashLookup(ctx, n, row)
 	case *plan.Iterate:

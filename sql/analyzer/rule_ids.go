@@ -19,7 +19,6 @@ const (
 	resolveCreateSelectId                       // resolveCreateSelect
 	resolveSubqueriesId                         // resolveSubqueries
 	resolveUnionsId                             // resolveUnions
-	resolveDescribeQueryId                      // resolveDescribeQuery
 	ValidateColumnDefaultsId                    // validateColumnDefaults
 	validateCreateTriggerId                     // validateCreateTrigger
 	validateCreateProcedureId                   // validateCreateProcedure
@@ -27,7 +26,6 @@ const (
 	validateReadOnlyTransactionId               // validateReadOnlyTransaction
 	validateDatabaseSetId                       // validateDatabaseSet
 	validatePrivilegesId                        // validatePrivileges
-	applyEventSchedulerId                       // applyEventScheduler
 
 	// default
 	flattenTableAliasesId          // flattenTableAliases
@@ -67,8 +65,6 @@ const (
 	applyProceduresId            // applyProcedures
 	assignRoutinesId             // assignRoutines
 	modifyUpdateExprsForJoinId   // modifyUpdateExprsForJoin
-	applyUpdateAccumulatorsId    // applyUpdateAccumulators
-	wrapWithRollbackId           // wrapWithRollback
 	applyForeignKeysId           // applyForeignKeys
 
 	// validate
@@ -86,8 +82,6 @@ const (
 
 	// after all
 	cacheSubqueryAliasesInJoinsId    // cacheSubqueryAliasesInJoins
-	backtickDefaulColumnValueNamesId // backtickDefaultColumnValueNames
-	AutocommitId                     // addAutocommit
+	BacktickDefaulColumnValueNamesId // backtickDefaultColumnValueNames
 	TrackProcessId                   // trackProcess
-	parallelizeId                    // parallelize
 )

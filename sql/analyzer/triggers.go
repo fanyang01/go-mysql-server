@@ -193,7 +193,8 @@ func applyTriggers(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope,
 			return nil, transform.SameTree, err
 		}
 
-		b := planbuilder.New(ctx, a.Catalog, sql.NewMysqlParser())
+		b := planbuilder.New(ctx, a.Catalog, nil, nil)
+		b.DisableAuth()
 		prevActive := b.TriggerCtx().Active
 		b.TriggerCtx().Active = true
 		defer func() {
@@ -346,6 +347,7 @@ func applyTrigger(ctx *sql.Context, a *Analyzer, originalNode, n sql.Node, scope
 
 		switch n := c.Node.(type) {
 		case *plan.InsertInto:
+			qFlags.Set(sql.QFlagTrigger)
 			if trigger.TriggerTime == sqlparser.BeforeStr {
 				triggerExecutor := plan.NewTriggerExecutor(n.Source, triggerLogic, plan.InsertTrigger, plan.TriggerTime(trigger.TriggerTime), sql.TriggerDefinition{
 					Name:            trigger.TriggerName,
@@ -359,6 +361,7 @@ func applyTrigger(ctx *sql.Context, a *Analyzer, originalNode, n sql.Node, scope
 				}), transform.NewTree, nil
 			}
 		case *plan.Update:
+			qFlags.Set(sql.QFlagTrigger)
 			if trigger.TriggerTime == sqlparser.BeforeStr {
 				triggerExecutor := plan.NewTriggerExecutor(n.Child, triggerLogic, plan.UpdateTrigger, plan.TriggerTime(trigger.TriggerTime), sql.TriggerDefinition{
 					Name:            trigger.TriggerName,
@@ -387,6 +390,7 @@ func applyTrigger(ctx *sql.Context, a *Analyzer, originalNode, n sql.Node, scope
 					"does not support triggers; retry with single table deletes")
 			}
 
+			qFlags.Set(sql.QFlagTrigger)
 			if trigger.TriggerTime == sqlparser.BeforeStr {
 				triggerExecutor := plan.NewTriggerExecutor(n.Child, triggerLogic, plan.DeleteTrigger, plan.TriggerTime(trigger.TriggerTime), sql.TriggerDefinition{
 					Name:            trigger.TriggerName,
@@ -420,13 +424,6 @@ func getUpdateJoinSource(n sql.Node) *plan.UpdateSource {
 // getTriggerLogic analyzes and returns the Node representing the trigger body for the trigger given, applied to the
 // plan node given, which must be an insert, update, or delete.
 func getTriggerLogic(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, trigger *plan.CreateTrigger, qFlags *sql.QueryFlags) (sql.Node, error) {
-	// For trigger body analysis, we don't want any row update accumulators applied to insert / update / delete
-	// statements, we need the raw output from them.
-	var noRowUpdateAccumulators RuleSelector
-	noRowUpdateAccumulators = func(id RuleId) bool {
-		return DefaultRuleSelector(id) && id != applyUpdateAccumulatorsId
-	}
-
 	// For the reference to the row in the trigger table, we use the scope mechanism. This is a little strange because
 	// scopes for subqueries work with the child schemas of a scope node, but we don't have such a node here. Instead we
 	// fabricate one with the right properties (its child schema matches the table schema, with the right aliased name)
@@ -441,7 +438,7 @@ func getTriggerLogic(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scop
 			plan.NewTableAlias("new", trigger.Table),
 		)
 		s := (*plan.Scope)(nil).NewScope(scopeNode).WithMemos(scope.Memo(n).MemoNodes()).WithProcedureCache(scope.ProcedureCache())
-		triggerLogic, _, err = a.analyzeWithSelector(ctx, trigger.Body, s, SelectAllBatches, noRowUpdateAccumulators, qFlags)
+		triggerLogic, _, err = a.analyzeWithSelector(ctx, trigger.Body, s, SelectAllBatches, DefaultRuleSelector, qFlags)
 	case sqlparser.UpdateStr:
 		var scopeNode *plan.Project
 		if updateSrc := getUpdateJoinSource(n); updateSrc == nil {
@@ -464,7 +461,7 @@ func getTriggerLogic(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scop
 		}
 		// Triggers are wrapped in prepend nodes, which means that the parent scope is included
 		s := (*plan.Scope)(nil).NewScope(scopeNode).WithMemos(scope.Memo(n).MemoNodes()).WithProcedureCache(scope.ProcedureCache())
-		triggerLogic, _, err = a.analyzeWithSelector(ctx, trigger.Body, s, SelectAllBatches, noRowUpdateAccumulators, qFlags)
+		triggerLogic, _, err = a.analyzeWithSelector(ctx, trigger.Body, s, SelectAllBatches, DefaultRuleSelector, qFlags)
 	case sqlparser.DeleteStr:
 		scopeNode := plan.NewProject(
 			[]sql.Expression{expression.NewStar()},
@@ -472,10 +469,10 @@ func getTriggerLogic(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scop
 		)
 		// Triggers are wrapped in prepend nodes, which means that the parent scope is included
 		s := scope.NewScope(scopeNode)
-		triggerLogic, _, err = a.analyzeWithSelector(ctx, trigger.Body, s, SelectAllBatches, noRowUpdateAccumulators, qFlags)
+		triggerLogic, _, err = a.analyzeWithSelector(ctx, trigger.Body, s, SelectAllBatches, DefaultRuleSelector, qFlags)
 	}
 
-	return StripPassthroughNodes(triggerLogic), err
+	return triggerLogic, err
 }
 
 // validateNoCircularUpdates returns an error if the trigger logic attempts to update the table that invoked it (or any
@@ -516,42 +513,4 @@ func orderTriggersAndReverseAfter(triggers []*plan.CreateTrigger) []*plan.Create
 
 func triggerEventsMatch(event plan.TriggerEvent, event2 string) bool {
 	return strings.ToLower((string)(event)) == strings.ToLower(event2)
-}
-
-// wrapWithRollback wraps the entire tree iff it contains a trigger, allowing rollback when a trigger errors
-func wrapWithRollback(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, sel RuleSelector, qFlags *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
-	// Check if tree contains a TriggerExecutor
-	containsTrigger := false
-	transform.Inspect(n, func(n sql.Node) bool {
-		// After Triggers wrap nodes
-		if _, ok := n.(*plan.TriggerExecutor); ok {
-			containsTrigger = true
-			return false // done, don't bother to recurse
-		}
-
-		// Before Triggers on Inserts are inside Source
-		if n, ok := n.(*plan.InsertInto); ok {
-			if _, ok := n.Source.(*plan.TriggerExecutor); ok {
-				containsTrigger = true
-				return false
-			}
-		}
-
-		// Before Triggers on Delete and Update should be in children
-		return true
-	})
-
-	// No TriggerExecutor, so return same tree
-	if !containsTrigger {
-		return n, transform.SameTree, nil
-	}
-
-	// If we don't have a transaction session we can't do rollbacks
-	_, ok := ctx.Session.(sql.TransactionSession)
-	if !ok {
-		return plan.NewNoopTriggerRollback(n), transform.NewTree, nil
-	}
-
-	// Wrap tree with new node
-	return plan.NewTriggerRollback(n), transform.NewTree, nil
 }

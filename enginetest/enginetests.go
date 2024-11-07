@@ -583,7 +583,6 @@ func TestQueryPlan(t *testing.T, harness Harness, e QueryEngine, tt queries.Quer
 func TestQueryPlanWithName(t *testing.T, name string, harness Harness, e QueryEngine, query, expectedPlan string, options sql.DescribeOptions) {
 	t.Run(name, func(t *testing.T) {
 		ctx := NewContext(harness)
-
 		parsed, qFlags, err := planbuilder.Parse(ctx, e.EngineAnalyzer().Catalog, query)
 		require.NoError(t, err)
 
@@ -657,7 +656,7 @@ func TestOrderByGroupBy(t *testing.T, harness Harness) {
 		_, rowIter, _, err = e.Query(ctx, "select any_value(id), team from members group by team order by id")
 		require.NoError(t, err)
 		rowCount = 0
-		isServerTest := IsServerEngine(e)
+
 		for {
 			row, err = rowIter.Next(ctx)
 			if err == io.EOF {
@@ -666,13 +665,14 @@ func TestOrderByGroupBy(t *testing.T, harness Harness) {
 			rowCount++
 			require.NoError(t, err)
 
-			// TODO: needs fix to match MySQL, which its type is `LONG` = Int32
-			// currently, we convert any int result to SQL int64 type before sending it over the wire
 			var val int64
-			if isServerTest {
-				val = row[0].(int64)
-			} else {
-				val = int64(row[0].(int32))
+			switch v := row[0].(type) {
+			case int64:
+				val = v
+			case int32:
+				val = int64(v)
+			default:
+				panic(fmt.Sprintf("unexpected type %T", v))
 			}
 
 			team := row[1].(string)
@@ -701,13 +701,14 @@ func TestOrderByGroupBy(t *testing.T, harness Harness) {
 			rowCount++
 			require.NoError(t, err)
 
-			// TODO: needs fix to match MySQL, which its type is `LONG` = Int32
-			// currently, we convert any int result to SQL int64 type before sending it over the wire
 			var val int64
-			if isServerTest {
-				val = row[0].(int64)
-			} else {
-				val = int64(row[0].(int32))
+			switch v := row[0].(type) {
+			case int64:
+				val = v
+			case int32:
+				val = int64(v)
+			default:
+				panic(fmt.Sprintf("unexpected type %T", v))
 			}
 
 			team := row[1].(string)
@@ -1708,12 +1709,12 @@ func TestInsertScriptsPrepared(t *testing.T, harness Harness) {
 func TestGeneratedColumns(t *testing.T, harness Harness) {
 	harness.Setup(setup.MydbData)
 	for _, script := range queries.GeneratedColumnTests {
-		TestScriptPrepared(t, harness, script)
+		TestScript(t, harness, script)
 	}
 	for _, script := range queries.BrokenGeneratedColumnTests {
 		t.Run(script.Name, func(t *testing.T) {
 			t.Skip(script.Name)
-			TestScriptPrepared(t, harness, script)
+			TestScript(t, harness, script)
 		})
 	}
 }
@@ -4773,12 +4774,11 @@ func TestTracing(t *testing.T, harness Harness) {
 	require.NoError(t, err)
 
 	spans := tracer.Spans
-	// TODO restore TopN
 	var expectedSpans = []string{
-		"plan.Limit",
+		"plan.Limit", // why Limit if there's already TopN?
+		"plan.TopN",
 		"plan.Distinct",
 		"plan.Project",
-		"plan.Sort",
 		"plan.IndexedTableAccess",
 	}
 

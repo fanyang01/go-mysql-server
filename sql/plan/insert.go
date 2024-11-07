@@ -162,22 +162,6 @@ func (ii *InsertInto) WithChildren(children ...sql.Node) (sql.Node, error) {
 	return &np, nil
 }
 
-// CheckPrivileges implements the interface sql.Node.
-func (ii *InsertInto) CheckPrivileges(ctx *sql.Context, opChecker sql.PrivilegedOperationChecker) bool {
-	subject := sql.PrivilegeCheckSubject{
-		Database: CheckPrivilegeNameForDatabase(ii.db),
-		Table:    getTableName(ii.Destination),
-	}
-
-	if ii.IsReplace {
-		return opChecker.UserHasPrivileges(ctx,
-			sql.NewPrivilegedOperation(subject, sql.PrivilegeType_Insert, sql.PrivilegeType_Delete))
-	} else {
-		return opChecker.UserHasPrivileges(ctx,
-			sql.NewPrivilegedOperation(subject, sql.PrivilegeType_Insert))
-	}
-}
-
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (*InsertInto) CollationCoercibility(ctx *sql.Context) (collation sql.CollationID, coercibility byte) {
 	return sql.Collation_binary, 7
@@ -375,11 +359,6 @@ func (id InsertDestination) WithChildren(children ...sql.Node) (sql.Node, error)
 	return &id, nil
 }
 
-// CheckPrivileges implements the interface sql.Node.
-func (id *InsertDestination) CheckPrivileges(ctx *sql.Context, opChecker sql.PrivilegedOperationChecker) bool {
-	return id.Child.CheckPrivileges(ctx, opChecker)
-}
-
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (id *InsertDestination) CollationCoercibility(ctx *sql.Context) (collation sql.CollationID, coercibility byte) {
 	return sql.GetCoercibility(ctx, id.Child)
@@ -387,8 +366,6 @@ func (id *InsertDestination) CollationCoercibility(ctx *sql.Context) (collation 
 
 func GetInsertable(node sql.Node) (sql.InsertableTable, error) {
 	switch node := node.(type) {
-	case *Exchange:
-		return GetInsertable(node.Child)
 	case sql.InsertableTable:
 		return node, nil
 	case *ResolvedTable:

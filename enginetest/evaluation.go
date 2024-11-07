@@ -526,7 +526,7 @@ func injectBindVarsAndPrepare(
 		}
 	}
 
-	b := planbuilder.New(ctx, e.EngineAnalyzer().Catalog, sql.NewMysqlParser())
+	b := planbuilder.New(ctx, e.EngineAnalyzer().Catalog, e.EngineEventScheduler(), nil)
 	b.SetParserOptions(sql.LoadSqlMode(ctx).ParserOptions())
 	resPlan, _, err := b.BindOnly(parsed, q, nil)
 	if err != nil {
@@ -1080,8 +1080,6 @@ func assertSchemasEqualWithDefaults(t *testing.T, expected, actual sql.Schema) b
 
 func ExtractQueryNode(node sql.Node) sql.Node {
 	switch node := node.(type) {
-	case *plan.QueryProcess:
-		return ExtractQueryNode(node.Child())
 	case *plan.Releaser:
 		return ExtractQueryNode(node.Child)
 	default:
